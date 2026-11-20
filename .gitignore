@@ -1,0 +1,64 @@
+
+# =====================================
+# Node.js
+# =====================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+
+# =====================================
+# Environment Variables
+# =====================================
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# =====================================
+# Capacitor
+# =====================================
+.capacitor/
+
+# =====================================
+# Android Studio / Gradle
+# =====================================
+.gradle/
+.idea/
+*.iml
+local.properties
+
+# Android build outputs
+android/.gradle/
+android/build/
+android/app/build/
+*.apk
+*.aab
+
+# Signing keys
+*.jks
+*.keystore
+*.p12
+*.pem
+
+# =====================================
+# Operating System
+# =====================================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# =====================================
+# Editor
+# =====================================
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# =====================================
+# Temporary Files
+# =====================================
+*.tmp
+*.temp
+*.bak
