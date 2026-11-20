@@ -1,0 +1,121 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  >
+
+  <meta
+    name="description"
+    content="Pinoy Charades Live TV Scoreboard"
+  >
+
+  <meta name="theme-color" content="#130a43">
+
+  <title>Pinoy Charades | TV Scoreboard</title>
+
+  <!-- TV Stylesheet -->
+  <link rel="stylesheet" href="tv.css">
+
+  <!-- TV JavaScript Logic -->
+  <script src="tv.js" defer></script>
+</head>
+
+<body>
+
+  <main>
+
+    <!-- GAME HEADER -->
+    <header>
+      <div class="topline">
+        THE ULTIMATE GUESSING GAME
+      </div>
+
+      <h1>🎭 PINOY CHARADES</h1>
+
+      <p id="status" class="status" aria-live="polite">
+        WAITING FOR GAME
+      </p>
+    </header>
+
+    <!-- TEAM SCOREBOARD -->
+    <section class="teams" aria-label="Team Scores">
+
+      <!-- TEAM A -->
+      <article class="team a">
+
+        <h2>TEAM A</h2>
+
+        <div
+          id="score-a"
+          class="score"
+          aria-label="Team A Score"
+        >
+          0
+        </div>
+
+      </article>
+
+      <!-- VS -->
+      <div class="vs" aria-hidden="true">
+        VS
+      </div>
+
+      <!-- TEAM B -->
+      <article class="team b">
+
+        <h2>TEAM B</h2>
+
+        <div
+          id="score-b"
+          class="score"
+          aria-label="Team B Score"
+        >
+          0
+        </div>
+
+      </article>
+
+    </section>
+
+    <!-- GAME STATUS -->
+    <section class="info" aria-label="Game Information">
+
+      <!-- COUNTDOWN TIMER -->
+      <div
+        id="timer"
+        class="timer"
+        role="timer"
+        aria-label="Time left"
+      >
+        02:00
+      </div>
+
+      <p id="turn-label">
+        Go back to the game tab to start playing.
+      </p>
+
+      <p id="round-label">
+        Ready to play
+      </p>
+
+    </section>
+
+    <!-- FOOTER -->
+    <footer>
+      <p>ACT IT OUT • GUESS THE WORD • WIN THE GAME!</p>
+
+      <p>
+        Live Scoreboard |
+        Pinoy Charades
+      </p>
+    </footer>
+
+  </main>
+
+</body>
+</html>
