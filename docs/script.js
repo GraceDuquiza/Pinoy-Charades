@@ -56,6 +56,7 @@ window.CHARADES_CARDS = [
   const STORE = 'pinoyCharades.game.v2';
   const PUBLIC_STORE = 'pinoyCharades.public.v1';
   const CARDS = window.CHARADES_CARDS || [];
+  const TURN_SECONDS = 120;
 
   const $ = (id) => document.getElementById(id);
   const screens = [...document.querySelectorAll('.screen')];
@@ -64,7 +65,6 @@ window.CHARADES_CARDS = [
     teamA:$('team-a'),
     teamB:$('team-b'),
     turns:$('turn-count'),
-    duration:$('duration'),
     pinA:$('pin-a'),
     pinB:$('pin-b'),
     error:$('setup-error'),
@@ -75,6 +75,8 @@ window.CHARADES_CARDS = [
   let ticker = null;
   let wakeLock = null;
   let lastCardId = null;
+  let alarmAudio = null;
+  let lastCountdownSecond = null;
 
   const publicChannel = 'BroadcastChannel' in window
     ? new BroadcastChannel('pinoyCharades.public.v1')
@@ -127,6 +129,9 @@ window.CHARADES_CARDS = [
         saved.teams?.length === 2 &&
         Number.isInteger(saved.completedTurns)
       ) {
+        // Keep the deadline of an in-progress turn and use two minutes for future turns.
+        saved.durationSeconds = TURN_SECONDS;
+        if (saved.phase==='round-end') saved.phase = 'between';
         return saved;
       }
     } catch {
@@ -269,13 +274,12 @@ window.CHARADES_CARDS = [
 
   function summary() {
     const rounds = validInt(nodes.turns.value,1,30);
-    const minutes = validInt(nodes.duration.value,1,3);
 
     $('total-turns').textContent =
       `${rounds*2} total turns`;
 
     $('total-duration').textContent =
-      `${rounds*2*minutes} minutes of play, plus breaks`;
+      `Up to ${rounds*2*TURN_SECONDS/60} minutes of guessing`;
   }
 
   function syncNames(team) {
@@ -335,7 +339,6 @@ window.CHARADES_CARDS = [
     const a = validInt(nodes.teamA.value,2,15);
     const b = validInt(nodes.teamB.value,2,15);
     const turns = validInt(nodes.turns.value,1,30);
-    const duration = validInt(nodes.duration.value,1,3);
     const pins = [nodes.pinA.value,nodes.pinB.value];
     const categories = checkedCategories($('setup-form'));
 
@@ -385,7 +388,7 @@ window.CHARADES_CARDS = [
         };
       }),
       turnsPerTeam:turns,
-      durationSeconds:duration*60,
+      durationSeconds:TURN_SECONDS,
       draw:[null,null],
       firstGuesser:null,
       completedTurns:0,
@@ -502,6 +505,7 @@ window.CHARADES_CARDS = [
     if (!t) return renderResults();
 
     updateScores();
+    renderOutcome($('next-outcome'));
 
     $('next-guessing').textContent =
       game.phase==='playing'
@@ -536,15 +540,17 @@ window.CHARADES_CARDS = [
 
     unlocked = false;
 
-    $('lock-team').textContent = teamLabel(t.acting);
-
+    const actor = playerName(t.acting,t.index);
+    $('lock-progress').textContent = `TURN ${game.completedTurns+1} OF ${game.turnsPerTeam*2}`;
+    $('lock-title').textContent = game.round ? 'Secret word hidden' : 'Pass the phone to the actor';
+    $('lock-description').textContent = game.round
+      ? `${actor} (${teamLabel(t.acting)}) acts. The checker keeps the phone.`
+      : `${actor} (${teamLabel(t.acting)}), enter your team’s code to choose a category and see your card.`;
     $('locked-round').hidden = !game.round;
+    $('unlock-form').hidden = Boolean(game.round);
+    $('toggle-unlock').setAttribute('aria-expanded','false');
+    $('unlock-submit').textContent = game.round ? 'REVEAL WORD' : 'CHOOSE CATEGORIES';
     if (game.round) renderRoundControls(true);
-
-    $('lock-description').textContent =
-      game.round
-        ? 'To see the secret word again, enter the acting team’s code.'
-        : `Actor, type ${teamLabel(t.acting)}’s code. Then give the phone to your checker.`;
 
     // Games saved before the switch to two digits still use their original PINs.
     const length = game.pinLength ?? 4;
@@ -613,9 +619,8 @@ window.CHARADES_CARDS = [
     $('category-actor').textContent =
       `${teamLabel(t.acting)} — ${playerName(t.acting,t.index)}`;
 
-    const minutes = game.durationSeconds / 60;
     $('turn-instructions').textContent =
-      `${teamLabel(t.guessing)} has ${minutes} ${minutes === 1 ? 'minute' : 'minutes'} to guess. Checker, say the category out loud. Tap Correct for a right guess. Actor, act without talking. If the word feels too hard, make an X with your arms. The checker taps Skip for a new card.`;
+      `Pick the categories you want to draw from. You can change cards before starting the timer. Then ${teamLabel(t.guessing)} has two minutes to guess the chosen word.`;
 
     $('turn-categories').querySelectorAll('input[name="category"]')
       .forEach(box=>{
@@ -695,7 +700,6 @@ window.CHARADES_CARDS = [
     game.round = {
       ...t,
       correct:0,
-      skips:0,
       endAt:null,
       cardId:card.id
     };
@@ -710,7 +714,9 @@ window.CHARADES_CARDS = [
 
     game.round.endAt = Date.now()+game.durationSeconds*1000;
     game.phase = 'playing';
+    lastCountdownSecond = null;
     save();
+    enableAlarmAudio();
     if (unlocked) {
       renderPlaying();
     } else {
@@ -741,6 +747,12 @@ window.CHARADES_CARDS = [
       preparing ? `${team} GUESSES NEXT` : `${team} IS GUESSING`;
     $(locked ? 'locked-start-timer' : 'start-timer').hidden = !preparing;
     $(locked ? 'locked-correct' : 'correct-btn').hidden = preparing;
+    if (locked) {
+      $('locked-clock-label').textContent = preparing ? 'GUESSING TIME' : 'TIME LEFT';
+      $('locked-instruction').textContent = preparing
+        ? 'Say the category aloud. Start the timer when the actor is ready.'
+        : 'Checker, tap Correct as soon as the team guesses the word.';
+    }
     const left = preparing ? game.durationSeconds*1000 : game.round.endAt-Date.now();
     renderClock($(locked ? 'locked-clock' : 'clock'), left);
     updateScores();
@@ -769,50 +781,24 @@ window.CHARADES_CARDS = [
     })[card?.category]||'';
 
     const preparing = game.phase==='preparing';
-    $('skip-hint').hidden = preparing;
-    $('skip-btn').textContent = preparing ? '↪ NEW CARD' : '↪ SKIP';
+    $('new-card').hidden = !preparing;
     $('round-status').textContent = preparing
       ? 'Choose your word and plan your act. Tap Start Timer when you’re ready for guesses.'
-      : `Correct: ${t.correct} · Skipped: ${t.skips}`;
+      : 'A right guess earns one point and ends this turn.';
   }
 
   // ---------------------------
-  // CORRECT / SKIP
+  // SCORING AND CARD SELECTION
   // ---------------------------
 
-  function answer(correct) {
-    if (game?.phase==='preparing' && unlocked && !correct) {
-      drawNextCard();
-      return;
-    }
-    if (
-      !game ||
-      game.phase!=='playing' ||
-      !game.round
-    ) return;
-
-    if (!unlocked && (!correct || $('lock').hidden)) return;
-
-    if (Date.now()>=game.round.endAt) {
-      endTurn();
-      return;
-    }
-
-    if (correct) {
-      game.round.correct++;
-      game.scores[game.round.guessing]++;
-      if (!unlocked) {
-        endTurn('between');
-        return;
-      }
-    } else {
-      game.round.skips++;
-    }
-
-    drawNextCard();
+  function markCorrect() {
+    if (game?.phase!=='playing' || !game.round) return;
+    if ($('playing').hidden && $('lock').hidden) return;
+    endTurn(Date.now() < game.round.endAt ? 'correct' : 'timeout');
   }
 
   function drawNextCard() {
+    if (game?.phase!=='preparing' || !unlocked) return;
     const next = pickCard();
     if (next) {
       game.round.cardId = next.id;
@@ -825,6 +811,47 @@ window.CHARADES_CARDS = [
   // ---------------------------
   // TIMER MANAGEMENT
   // ---------------------------
+
+  function enableAlarmAudio() {
+    const Audio = window.AudioContext || window.webkitAudioContext;
+    if (!Audio) return;
+    try {
+      alarmAudio ??= new Audio();
+      if (alarmAudio.state !== 'running') alarmAudio.resume().catch(()=>{});
+    } catch {
+      // The visual clock and spoken cues can still work without Web Audio.
+    }
+  }
+
+  function speakCue(words) {
+    const speech = window.speechSynthesis;
+    if (!speech || !window.SpeechSynthesisUtterance) return;
+    speech.cancel();
+    const cue = new SpeechSynthesisUtterance(words);
+    cue.lang = 'en-US';
+    cue.rate = 1.15;
+    speech.speak(cue);
+  }
+
+  function soundCountdown(seconds) {
+    if (seconds === lastCountdownSecond) return;
+    lastCountdownSecond = seconds;
+    if (alarmAudio?.state === 'running') {
+      const tone = alarmAudio.createOscillator();
+      const gain = alarmAudio.createGain();
+      const now = alarmAudio.currentTime;
+      const duration = seconds === 0 ? 0.4 : 0.12;
+      tone.frequency.value = seconds === 0 ? 520 : 800;
+      gain.gain.setValueAtTime(0.08, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+      tone.connect(gain);
+      gain.connect(alarmAudio.destination);
+      tone.onended = () => { tone.disconnect(); gain.disconnect(); };
+      tone.start(now);
+      tone.stop(now + duration);
+    }
+    speakCue(seconds === 0 ? 'Time’s up!' : String(seconds));
+  }
 
   function startTicker() {
     stopTicker();
@@ -844,7 +871,7 @@ window.CHARADES_CARDS = [
 
   function renderClock(clock, left) {
     clock.textContent = formatTime(left);
-    clock.parentElement.classList.toggle('danger', left<=15000);
+    clock.parentElement.classList.toggle('danger', left<=5000);
   }
 
   function checkTimer() {
@@ -853,7 +880,7 @@ window.CHARADES_CARDS = [
     const left = game.round.endAt-Date.now();
 
     if (left<=0) {
-      endTurn();
+      endTurn('timeout');
       return;
     }
 
@@ -862,9 +889,11 @@ window.CHARADES_CARDS = [
     } else if (!$('playing').hidden) {
       renderClock($('clock'), left);
     }
+    const seconds = Math.ceil(left/1000);
+    if (seconds<=5) soundCountdown(seconds);
   }
 
-  function endTurn(nextPhase = 'round-end') {
+  function endTurn(outcome) {
     if (
       !game ||
       game.phase!=='playing' ||
@@ -874,55 +903,47 @@ window.CHARADES_CARDS = [
     stopTicker();
     unlocked = false;
 
-    game.lastRound = {...game.round};
+    if (outcome === 'correct') {
+      game.scores[game.round.guessing]++;
+      game.round.correct++;
+    }
+    game.lastRound = {...game.round, outcome};
     game.round = null;
     game.completedTurns++;
 
     game.phase =
       game.completedTurns>=game.turnsPerTeam*2
         ? 'results'
-        : nextPhase;
+        : 'between';
 
     save();
 
     if (game.phase==='results') {
       renderResults();
-    } else if (game.phase==='between') {
-      renderBetween();
     } else {
-      renderRoundEnd();
+      renderBetween();
     }
 
     view(game.phase);
+    if (outcome === 'timeout') {
+      soundCountdown(0);
+    } else {
+      window.speechSynthesis?.cancel();
+    }
   }
 
   // ---------------------------
   // ROUND RESULTS
   // ---------------------------
 
-  function renderRoundEnd() {
+  function renderOutcome(element) {
     const last = game.lastRound;
-
-    $('ended-team').textContent =
-      `${teamLabel(last.guessing)} GUESSED`;
-
-    $('ended-summary').textContent =
-      `${last.correct} correct · ${last.skips} skipped`;
-
-    $('ended-progress').textContent =
-      `${game.completedTurns} of ${game.turnsPerTeam*2} turns finished`;
-
-    updateScores();
-  }
-
-  function nextTurn() {
-    if (game?.phase!=='round-end') return;
-
-    game.phase = 'between';
-
-    save();
-    renderBetween();
-    view('between');
+    element.hidden = !last?.outcome || !!game.round;
+    if (element.hidden) return;
+    const team = teamLabel(last.guessing);
+    element.textContent = last.outcome === 'correct'
+      ? `Correct! ${team} earns 1 point.`
+      : `Time’s up! ${team} finishes the turn with ${last.correct} ${last.correct===1 ? 'point' : 'points'}.`;
   }
 
   // ---------------------------
@@ -933,6 +954,7 @@ window.CHARADES_CARDS = [
     if (!game) return;
 
     updateScores();
+    renderOutcome($('final-outcome'));
 
     const win = winner();
 
@@ -976,7 +998,7 @@ window.CHARADES_CARDS = [
 
     if (game.phase==='playing') {
       if (Date.now()>=game.round.endAt) {
-        endTurn();
+        endTurn('timeout');
       } else {
         startTicker();
         showLock();
@@ -989,9 +1011,6 @@ window.CHARADES_CARDS = [
     } else if (game.phase==='between') {
       renderBetween();
       view('between');
-    } else if (game.phase==='round-end') {
-      renderRoundEnd();
-      view('round-end');
     } else if (game.phase==='results') {
       renderResults();
       view('results');
@@ -1060,8 +1079,7 @@ window.CHARADES_CARDS = [
   [
     nodes.teamA,
     nodes.teamB,
-    nodes.turns,
-    nodes.duration
+    nodes.turns
   ].forEach(el=>el.addEventListener('input',summary));
 
   nodes.teamA.addEventListener('input',()=>syncNames(0));
@@ -1074,6 +1092,12 @@ window.CHARADES_CARDS = [
 
   $('unlock-next').addEventListener('click',showLock);
   $('unlock-form').addEventListener('submit',unlock);
+  $('toggle-unlock').addEventListener('click',()=>{
+    const form = $('unlock-form');
+    form.hidden = !form.hidden;
+    $('toggle-unlock').setAttribute('aria-expanded',String(!form.hidden));
+    if (!form.hidden) $('unlock-pin').focus();
+  });
 
   $('lock-back').addEventListener('click',()=>{
     renderBetween();
@@ -1084,19 +1108,23 @@ window.CHARADES_CARDS = [
   $('start-timer').addEventListener('click',startTimer);
   $('locked-start-timer').addEventListener('click',startTimer);
 
+  // A restored timer may need a fresh gesture before the browser allows audio.
+  document.addEventListener('click',()=>{
+    if (game?.phase==='playing' && alarmAudio?.state!=='running') enableAlarmAudio();
+  }, true);
+
   $('cancel-categories').addEventListener('click',()=>{
     unlocked = false;
     renderBetween();
     view('between');
   });
 
-  $('correct-btn').addEventListener('click',()=>answer(true));
-  $('locked-correct').addEventListener('click',()=>answer(true));
-  $('skip-btn').addEventListener('click',()=>answer(false));
+  $('correct-btn').addEventListener('click',markCorrect);
+  $('locked-correct').addEventListener('click',markCorrect);
+  $('new-card').addEventListener('click',drawNextCard);
 
   $('lock-during').addEventListener('click',showLock);
 
-  $('next-turn-btn').addEventListener('click',nextTurn);
   $('results-new').addEventListener('click',newGame);
 
   $('open-tv').addEventListener('click',openTV);
@@ -1112,7 +1140,7 @@ window.CHARADES_CARDS = [
     ) {
       checkTimer();
 
-      if (unlocked) {
+      if (game.phase==='playing') {
         keepAwake();
       }
     }

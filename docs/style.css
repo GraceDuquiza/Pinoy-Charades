@@ -36,7 +36,50 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.23;b
 .btn[hidden] { display: none; }
 .btn:disabled { opacity: .65; cursor: default; }
 .name-list { display: grid; gap: .5rem; }
-#unlock-pin { display: block; margin: .5rem 0 1rem; padding: .6rem; font: inherit; }
+#lock .screen-nav { margin-bottom: 18px; }
+#lock-title { margin: 0; font-size: clamp(28px, 7vw, 38px); line-height: 1.1; }
+#lock-description, #locked-instruction { line-height: 1.5; overflow-wrap: anywhere; }
+#lock-description { margin: 8px 0 20px; color: #e7dcfa; }
+.lock-play-panel {
+  padding: clamp(16px, 5vw, 24px);
+  color: #321f5b;
+  background: #fff5e8;
+  border: 2px solid var(--gold);
+  border-radius: 17px;
+  text-align: center;
+}
+#locked-guessing { margin: 0; color: #682867; font-size: 16px; }
+.lock-play-panel .clock-panel { margin: 14px 0; }
+#locked-instruction { margin: 14px 0; }
+.clock-panel.danger { border-color: #ffdb75; box-shadow: 0 0 0 3px #ffdb75; }
+#toggle-unlock {
+  display: block;
+  min-height: 44px;
+  margin: 0 auto;
+  border: 0;
+  background: transparent;
+  color: #f4e8ff;
+  text-decoration: underline;
+  font: inherit;
+  cursor: pointer;
+}
+#toggle-unlock:focus-visible { outline: 2px solid var(--gold); }
+#unlock-form { margin-top: 10px; }
+#unlock-pin-label { font-size: 15px; font-weight: 700; }
+#unlock-pin {
+  display: block;
+  width: 100%;
+  min-height: 48px;
+  margin: 8px 0 16px;
+  padding: 10px 14px;
+  border: 2px solid #81709b;
+  border-radius: 9px;
+  background: white;
+  color: var(--ink);
+  font: bold 22px monospace;
+  letter-spacing: .4em;
+}
+.turn-outcome { padding: 12px; background: #fff1d6; color: var(--ink); border-radius: 10px; font-weight: 700; text-align: center; }
 .btn.correct, .btn.skip { color: white; }
 #open-tv { margin-left: auto; padding: 0 12px; font: bold 13px Arial, sans-serif; flex-shrink: 0; }
 #tv-dialog { margin: auto; width: min(90vw, 26rem); }
