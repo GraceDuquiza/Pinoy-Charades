@@ -530,9 +530,7 @@ window.CHARADES_CARDS = [
   // ---------------------------
 
   function showLock() {
-    const t = game?.phase==='playing'
-      ? game.round
-      : upcomingTurn();
+    const t = game?.round ?? upcomingTurn();
 
     if (!t) return;
 
@@ -540,9 +538,12 @@ window.CHARADES_CARDS = [
 
     $('lock-team').textContent = teamLabel(t.acting);
 
+    $('locked-round').hidden = !game.round;
+    if (game.round) renderRoundControls(true);
+
     $('lock-description').textContent =
-      game.phase==='playing'
-        ? 'The timer is still going! Type your team’s code to keep playing.'
+      game.round
+        ? 'To see the secret word again, enter the acting team’s code.'
         : `Actor, type ${teamLabel(t.acting)}’s code. Then give the phone to your checker.`;
 
     // Games saved before the switch to two digits still use their original PINs.
@@ -555,6 +556,7 @@ window.CHARADES_CARDS = [
     showPinMessage(input, '');
 
     view('lock');
+    checkTimer();
   }
 
   function unlock(ev) {
@@ -562,9 +564,7 @@ window.CHARADES_CARDS = [
 
     if (!game) return;
 
-    const t = game.phase==='playing'
-      ? game.round
-      : upcomingTurn();
+    const t = game.round ?? upcomingTurn();
 
     if (!t) return;
 
@@ -583,10 +583,10 @@ window.CHARADES_CARDS = [
     unlocked = true;
     $('unlock-pin').value = '';
 
-    if (game.phase==='playing') {
+    if (game.round) {
       checkTimer();
 
-      if (game.phase==='playing') {
+      if (game.round) {
         renderPlaying();
         view('playing');
       }
@@ -688,30 +688,34 @@ window.CHARADES_CARDS = [
     const t = upcomingTurn();
 
     game.selectedCategories = checked;
-    game.phase = 'playing';
+    const card = pickCard();
+    if (!card) return;
 
-    // Save an absolute deadline so locking the screen or reloading the page
-    // keeps the same amount of time on both the controller and the TV.
+    game.phase = 'preparing';
     game.round = {
       ...t,
       correct:0,
       skips:0,
-      endAt:Date.now()+game.durationSeconds*1000,
-      cardId:null
+      endAt:null,
+      cardId:card.id
     };
-
-    const card = pickCard();
-
-    if (!card) {
-      game.phase = 'between';
-      return;
-    }
-
-    game.round.cardId = card.id;
 
     save();
     renderPlaying();
     view('playing');
+  }
+
+  function startTimer() {
+    if (game?.phase!=='preparing' || !game.round) return;
+
+    game.round.endAt = Date.now()+game.durationSeconds*1000;
+    game.phase = 'playing';
+    save();
+    if (unlocked) {
+      renderPlaying();
+    } else {
+      renderRoundControls(true);
+    }
     startTicker();
     keepAwake();
   }
@@ -730,14 +734,25 @@ window.CHARADES_CARDS = [
     }`;
   }
 
+  function renderRoundControls(locked) {
+    const preparing = game.phase==='preparing';
+    const team = teamLabel(game.round.guessing);
+    $(locked ? 'locked-guessing' : 'playing-turn').textContent =
+      preparing ? `${team} GUESSES NEXT` : `${team} IS GUESSING`;
+    $(locked ? 'locked-start-timer' : 'start-timer').hidden = !preparing;
+    $(locked ? 'locked-correct' : 'correct-btn').hidden = preparing;
+    const left = preparing ? game.durationSeconds*1000 : game.round.endAt-Date.now();
+    renderClock($(locked ? 'locked-clock' : 'clock'), left);
+    updateScores();
+  }
+
   function renderPlaying() {
     if (!game?.round) return;
 
     const t = game.round;
     const card = CARDS.find(c=>c.id===t.cardId);
 
-    $('playing-turn').textContent =
-      `${teamLabel(t.guessing)} IS GUESSING`;
+    renderRoundControls(false);
 
     $('acting-line').textContent =
       `${teamLabel(t.acting)} — ${playerName(t.acting,t.index)} acts`;
@@ -753,18 +768,12 @@ window.CHARADES_CARDS = [
       pinoy:'MOVIE TITLES'
     })[card?.category]||'';
 
-    $('round-status').textContent =
-      `Correct: ${t.correct} · Skipped: ${t.skips}`;
-
-    $('clock').textContent =
-      formatTime(t.endAt-Date.now());
-
-    $('clock-panel').classList.toggle(
-      'danger',
-      t.endAt-Date.now()<=15000
-    );
-
-    updateScores();
+    const preparing = game.phase==='preparing';
+    $('skip-hint').hidden = preparing;
+    $('skip-btn').textContent = preparing ? '↪ NEW CARD' : '↪ SKIP';
+    $('round-status').textContent = preparing
+      ? 'Choose your word and plan your act. Tap Start Timer when you’re ready for guesses.'
+      : `Correct: ${t.correct} · Skipped: ${t.skips}`;
   }
 
   // ---------------------------
@@ -772,12 +781,17 @@ window.CHARADES_CARDS = [
   // ---------------------------
 
   function answer(correct) {
+    if (game?.phase==='preparing' && unlocked && !correct) {
+      drawNextCard();
+      return;
+    }
     if (
       !game ||
       game.phase!=='playing' ||
-      !unlocked ||
       !game.round
     ) return;
+
+    if (!unlocked && (!correct || $('lock').hidden)) return;
 
     if (Date.now()>=game.round.endAt) {
       endTurn();
@@ -787,12 +801,19 @@ window.CHARADES_CARDS = [
     if (correct) {
       game.round.correct++;
       game.scores[game.round.guessing]++;
+      if (!unlocked) {
+        endTurn('between');
+        return;
+      }
     } else {
       game.round.skips++;
     }
 
-    const next = pickCard();
+    drawNextCard();
+  }
 
+  function drawNextCard() {
+    const next = pickCard();
     if (next) {
       game.round.cardId = next.id;
     }
@@ -821,6 +842,11 @@ window.CHARADES_CARDS = [
     releaseAwake();
   }
 
+  function renderClock(clock, left) {
+    clock.textContent = formatTime(left);
+    clock.parentElement.classList.toggle('danger', left<=15000);
+  }
+
   function checkTimer() {
     if (game?.phase!=='playing'||!game.round) return;
 
@@ -831,20 +857,14 @@ window.CHARADES_CARDS = [
       return;
     }
 
-    if (
-      unlocked &&
-      document.querySelector('#playing.active')
-    ) {
-      $('clock').textContent = formatTime(left);
-
-      $('clock-panel').classList.toggle(
-        'danger',
-        left<=15000
-      );
+    if (!$('lock').hidden) {
+      renderClock($('locked-clock'), left);
+    } else if (!$('playing').hidden) {
+      renderClock($('clock'), left);
     }
   }
 
-  function endTurn() {
+  function endTurn(nextPhase = 'round-end') {
     if (
       !game ||
       game.phase!=='playing' ||
@@ -861,12 +881,14 @@ window.CHARADES_CARDS = [
     game.phase =
       game.completedTurns>=game.turnsPerTeam*2
         ? 'results'
-        : 'round-end';
+        : nextPhase;
 
     save();
 
     if (game.phase==='results') {
       renderResults();
+    } else if (game.phase==='between') {
+      renderBetween();
     } else {
       renderRoundEnd();
     }
@@ -959,6 +981,8 @@ window.CHARADES_CARDS = [
         startTicker();
         showLock();
       }
+    } else if (game.phase==='preparing') {
+      showLock();
     } else if (game.phase==='draw') {
       renderDraw();
       view('draw');
@@ -1057,6 +1081,8 @@ window.CHARADES_CARDS = [
   });
 
   $('start-turn').addEventListener('click',startTurn);
+  $('start-timer').addEventListener('click',startTimer);
+  $('locked-start-timer').addEventListener('click',startTimer);
 
   $('cancel-categories').addEventListener('click',()=>{
     unlocked = false;
@@ -1065,6 +1091,7 @@ window.CHARADES_CARDS = [
   });
 
   $('correct-btn').addEventListener('click',()=>answer(true));
+  $('locked-correct').addEventListener('click',()=>answer(true));
   $('skip-btn').addEventListener('click',()=>answer(false));
 
   $('lock-during').addEventListener('click',showLock);
